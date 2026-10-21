@@ -24,12 +24,14 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import {
   API_ATTACH_PATH,
   API_CAPABILITY_PATH,
+  API_RAW_PATH,
   DEFAULT_API_KEY_ENV,
   DEFAULT_API_STYLE,
   DEFAULT_INTERCEPT_IMAGE_SEND,
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_OUTPUT_TOKENS,
   DEFAULT_PROMPT,
+  DEFAULT_RENDER_IMAGE_PREVIEW,
   DEFAULT_TIMEOUT_MS,
   MAX_ATTACH_BASE64_CHARS,
   PROTOCOL_NAMESPACE,
@@ -41,6 +43,7 @@ import {
   nonEmptyString,
   normalizeBaseURL,
   parseAttachmentNote,
+  parseAttachmentRefJSON,
   positiveNumber,
   sniffMimeType,
   type ApiStyle,
@@ -87,6 +90,8 @@ export interface Config {
   timeoutMs: Volatile<number>
   /** 纯文本模型收到贴图时是否自动改写为 describe_image 引用;判定在 client 侧。 */
   interceptImageSend: Volatile<boolean>
+  /** 会话内是否把 note 引用原地渲染为缩略图;判定在 client 侧。 */
+  renderImagePreview: Volatile<boolean>
 }
 
 export const Config = Schema.object({
@@ -100,6 +105,7 @@ export const Config = Schema.object({
   maxOutputTokens: Schema.number().default(DEFAULT_MAX_OUTPUT_TOKENS).volatile(),
   timeoutMs: Schema.number().default(DEFAULT_TIMEOUT_MS).volatile(),
   interceptImageSend: Schema.boolean().default(DEFAULT_INTERCEPT_IMAGE_SEND).volatile(),
+  renderImagePreview: Schema.boolean().default(DEFAULT_RENDER_IMAGE_PREVIEW).volatile(),
 })
 
 /** 与宿主 `@deepseek-ai/dsh-attachment` 服务的鸭子面;不引入宿主类型依赖。 */
@@ -574,6 +580,42 @@ function registerCapabilityRoute(ctx: HostContext): void {
   })
 }
 
+/**
+ * 注册 raw 路由:按引用取回存储字节,供会话内缩略图使用。
+ * 引用是内容寻址的(attachmentId 即字节摘要),响应可以永久缓存。
+ * @param ctx - Host 上下文。
+ */
+function registerRawRoute(ctx: HostContext): void {
+  ctx.get('connection')?.fetch.register({
+    path: API_RAW_PATH,
+    methods: ['GET'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      const attachments = ctx.get('attachments')
+      if (attachments === undefined) {
+        return new Response('attachment store unavailable', { status: 503 })
+      }
+      const query = new URL(request.url).searchParams.get('ref')
+      if (query === null) return new Response('bad request', { status: 400 })
+      const ref = parseAttachmentRefJSON(query)
+      if (ref === undefined) return new Response('bad request', { status: 400 })
+      try {
+        const stored = await attachments.readImage(ref, request.signal ?? undefined)
+        return new Response(new Uint8Array(stored.data), {
+          status: 200,
+          headers: {
+            'content-type': stored.ref.mediaType,
+            'cache-control': 'private, max-age=31536000, immutable',
+            etag: `"${stored.ref.attachmentId}"`,
+          },
+        })
+      } catch {
+        return new Response('not found', { status: 404 })
+      }
+    },
+  })
+}
+
 /** 从工具执行上下文解析会话工作区(用于本地路径围栏)。 */
 function workspaceOf(exec: unknown): string | undefined {
   const agent = asRecord(exec)?.agent
@@ -592,6 +634,7 @@ function workspaceOf(exec: unknown): string | undefined {
 export function apply(ctx: HostContext, config: Config): void {
   registerAttachRoute(ctx)
   registerCapabilityRoute(ctx)
+  registerRawRoute(ctx)
   ctx.tools.register(defineTool({
     name: TOOL_NAME,
     description:

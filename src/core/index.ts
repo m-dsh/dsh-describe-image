@@ -36,11 +36,15 @@ export const DEFAULT_MAX_OUTPUT_TOKENS = 1024
 export const DEFAULT_TIMEOUT_MS = 120_000
 /** 纯文本模型收到贴图时是否自动改写为 describe_image 引用(仅 `false` 视为关闭)。 */
 export const DEFAULT_INTERCEPT_IMAGE_SEND = true
+/** 会话内是否把 note 引用原地渲染为缩略图(仅 `false` 视为关闭)。 */
+export const DEFAULT_RENDER_IMAGE_PREVIEW = true
 
 /** Host attach 路由:批量把 base64 图片入官方附件存储,返回引用。 */
 export const API_ATTACH_PATH = '/api/dsh-describe-image/attach' as const
 /** Host capability 路由:查询一个 provider/model 是否接受原生图片输入。 */
 export const API_CAPABILITY_PATH = '/api/dsh-describe-image/capability' as const
+/** Host raw 路由:按引用取回存储字节,供会话内缩略图使用。 */
+export const API_RAW_PATH = '/api/dsh-describe-image/raw' as const
 
 /** capability 查询结果为「支持图片」时的客户端缓存时长。 */
 export const CAPABILITY_TTL_MS = 30_000
@@ -196,10 +200,20 @@ export function parseAttachmentNote(input: string): ImageAttachmentRefLike | und
   if (!trimmed.startsWith(ATTACHMENT_NOTE_PREFIX) || !trimmed.endsWith(ATTACHMENT_NOTE_SUFFIX)) {
     return undefined
   }
-  const payload = trimmed.slice(ATTACHMENT_NOTE_PREFIX.length, trimmed.length - ATTACHMENT_NOTE_SUFFIX.length)
+  return parseAttachmentRefJSON(
+    trimmed.slice(ATTACHMENT_NOTE_PREFIX.length, trimmed.length - ATTACHMENT_NOTE_SUFFIX.length),
+  )
+}
+
+/**
+ * 解析裸引用 JSON(raw 路由的 query 参数形态)。
+ * @param json - 单个引用对象的 JSON 文本。
+ * @returns 校验通过的引用;无法解析时返回 `undefined`。
+ */
+export function parseAttachmentRefJSON(json: string): ImageAttachmentRefLike | undefined {
   let parsed: unknown
   try {
-    parsed = JSON.parse(payload)
+    parsed = JSON.parse(json)
   } catch {
     return undefined
   }
@@ -225,6 +239,79 @@ export function parseAttachmentNote(input: string): ImageAttachmentRefLike | und
     ...(name === undefined ? {} : { name }),
     ...(originalDimensions === undefined ? {} : { originalDimensions }),
   }
+}
+
+/** 文本里定位到的一条 note:引用与其在原文中的区间。 */
+export interface AttachmentNoteMatch {
+  readonly ref: ImageAttachmentRefLike
+  readonly start: number
+  readonly end: number
+}
+
+/**
+ * 在一段消息文本里定位全部 note 引用(预览渲染的定位器)。
+ * 用括号配平扫描而非正则:引用 JSON 含嵌套对象(originalDimensions),
+ * 且字符串值里可能出现任意括号字符。
+ * @param text - 消息文本。
+ * @returns 按出现顺序排列的定位结果。
+ */
+export function findAttachmentNotes(text: string): AttachmentNoteMatch[] {
+  const matches: AttachmentNoteMatch[] = []
+  let cursor = 0
+  while (cursor < text.length) {
+    const head = text.indexOf(ATTACHMENT_NOTE_PREFIX, cursor)
+    if (head < 0) break
+    const jsonStart = head + ATTACHMENT_NOTE_PREFIX.length
+    const balanced = balancedObjectEnd(text, jsonStart)
+    if (balanced !== undefined && text[balanced] === ATTACHMENT_NOTE_SUFFIX) {
+      const ref = parseAttachmentRefJSON(text.slice(jsonStart, balanced))
+      if (ref !== undefined) {
+        matches.push({ ref, start: head, end: balanced + 1 })
+        cursor = balanced + 1
+        continue
+      }
+    }
+    cursor = head + 1
+  }
+  return matches
+}
+
+/**
+ * 从 `start` 处(应为 `{`)做字符串感知的括号配平,返回配平结束下标。
+ * @param text - 完整文本。
+ * @param start - 起始 `{` 的下标。
+ * @returns 闭合 `}` 之后的下标;起始不是 `{` 或未配平时返回 `undefined`。
+ */
+function balancedObjectEnd(text: string, start: number): number | undefined {
+  if (text[start] !== '{') return undefined
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = start; index < text.length; index += 1) {
+    const ch = text[index]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{') depth += 1
+    else if (ch === '}') {
+      depth -= 1
+      if (depth === 0) return index + 1
+    }
+  }
+  return undefined
+}
+
+/**
+ * 构造 raw 取图路由的 URL。
+ * @param ref - 存储侧引用。
+ * @returns 带引用参数的完整路径。
+ */
+export function buildRawImageURL(ref: ImageAttachmentRefLike): string {
+  return `${API_RAW_PATH}?ref=${encodeURIComponent(JSON.stringify(ref))}`
 }
 
 /** 把未知输入收敛为正整数,否则返回 `undefined`。 */

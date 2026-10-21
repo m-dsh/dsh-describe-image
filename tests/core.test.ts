@@ -137,3 +137,62 @@ describe('isInterceptEnabled', () => {
     expect(isInterceptEnabled('x')).toBe(true)
   })
 })
+
+import {
+  API_RAW_PATH,
+  buildRawImageURL,
+  findAttachmentNotes,
+  parseAttachmentRefJSON,
+} from '../src/core'
+
+describe('findAttachmentNotes 定位器', () => {
+  const ref: ImageAttachmentRefLike = {
+    attachmentId: 'sha256:abc',
+    mediaType: 'image/webp',
+    bytes: 128,
+    width: 64,
+    height: 32,
+    name: 'shot.webp',
+  }
+  const note = formatAttachmentNote(ref)
+
+  it('定位前文+引用+后文中的引用,并给出正确区间', () => {
+    const text = `看这张\n${note}\n还有一张:${note}。`
+    const matches = findAttachmentNotes(text)
+    expect(matches).toHaveLength(2)
+    expect(text.slice(matches[0]?.start ?? -1, matches[0]?.end ?? -1)).toBe(note)
+    expect(text.slice(matches[1]?.start ?? -1, matches[1]?.end ?? -1)).toBe(note)
+    expect(matches[0]?.ref.attachmentId).toBe('sha256:abc')
+  })
+
+  it('括号与方括号出现在 JSON 字符串值里时不误判', () => {
+    const tricky = { ...ref, name: 'a]b{c"d.png' }
+    const text = `前文 ${formatAttachmentNote(tricky)} 后文`
+    const matches = findAttachmentNotes(text)
+    expect(matches).toHaveLength(1)
+    expect(matches[0]?.ref.name).toBe('a]b{c"d.png')
+  })
+
+  it('不配平/坏 JSON 的片段被跳过', () => {
+    expect(findAttachmentNotes('[image attachment {"a":1')).toHaveLength(0)
+    expect(findAttachmentNotes('[image attachment not-json]')).toHaveLength(0)
+    expect(findAttachmentNotes('普通文本')).toHaveLength(0)
+  })
+})
+
+describe('raw URL 与裸 JSON 解析', () => {
+  const ref: ImageAttachmentRefLike = {
+    attachmentId: 'sha256:abc',
+    mediaType: 'image/webp',
+    bytes: 128,
+    width: 64,
+    height: 32,
+    name: 'shot.webp',
+  }
+  it('buildRawImageURL 生成可往返的 raw 路径', () => {
+    const url = buildRawImageURL(ref)
+    expect(url.startsWith(`${API_RAW_PATH}?ref=`)).toBe(true)
+    const decoded = decodeURIComponent(url.slice(`${API_RAW_PATH}?ref=`.length))
+    expect(parseAttachmentRefJSON(decoded)).toEqual(ref)
+  })
+})

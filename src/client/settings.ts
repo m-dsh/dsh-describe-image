@@ -21,6 +21,7 @@ import {
 /** 与 Host Config 的 volatile 字段一一对应的可编辑设置。 */
 export interface DescribeImageSettings {
   interceptImageSend?: boolean
+  renderImagePreview?: boolean
   baseURL?: string
   apiStyle?: string
   model?: string
@@ -54,6 +55,12 @@ const FIELDS: readonly FieldSpec[] = [
     field: 'interceptImageSend',
     label: '发送时自动改写贴图',
     hint: '开启(默认):发给纯文本模型的贴图在提交时自动入库并改写为 describe_image 引用;支持图片输入的模型自动放行原图。关闭:保持宿主原生行为。',
+    kind: 'boolean',
+  },
+  {
+    field: 'renderImagePreview',
+    label: '会话内渲染图片预览',
+    hint: '开启(默认):聊天记录里的 [image attachment ...] 引用原地显示为缩略图,点击查看大图;仅影响本地显示。关闭:保持原始引用文本。',
     kind: 'boolean',
   },
   {

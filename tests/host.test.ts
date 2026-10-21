@@ -130,6 +130,7 @@ describe('Host 入口与 manifest 契约', () => {
       'maxBytes',
       'maxOutputTokens',
       'model',
+      'renderImagePreview',
       'timeoutMs',
     ])
     for (const field of fields) {
@@ -428,5 +429,35 @@ describe('capability 路由', () => {
     const h2 = harness(defaultRefs(), { llm: undefined })
     const r2 = await post(h2.routes.get(CAPABILITY) as never, { provider: 'p', model: 'm' })
     expect((await r2.json() as { ok: boolean }).ok).toBe(false)
+  })
+})
+
+describe('raw 路由', () => {
+  const RAW = '/api/dsh-describe-image/raw'
+
+  it('按引用返回存储字节并带内容寻址缓存头', async () => {
+    const { store } = attachStoreFake([REF])
+    const h = harness(defaultRefs(), { attachments: store })
+    const route = h.routes.get(RAW) as never
+    const response = await route(new Request(`http://x${RAW}?ref=${encodeURIComponent(JSON.stringify(REF))}`))
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe('image/png')
+    expect(response.headers.get('cache-control')).toContain('immutable')
+    expect(response.headers.get('etag')).toContain(REF.attachmentId)
+    const body = new Uint8Array(await response.arrayBuffer())
+    expect(Array.from(body)).toEqual(Array.from(PNG_BYTES))
+  })
+
+  it('缺 ref 或坏 JSON 返回 400;存储缺失返回 503', async () => {
+    const { store } = attachStoreFake([REF])
+    const h = harness(defaultRefs(), { attachments: store })
+    const route = h.routes.get(RAW) as never
+    const missing = await route(new Request(`http://x${RAW}`))
+    expect(missing.status).toBe(400)
+    const bad = await route(new Request(`http://x${RAW}?ref=%7Boops`))
+    expect(bad.status).toBe(400)
+    const h2 = harness(defaultRefs(), { attachments: undefined })
+    const unavailable = await (h2.routes.get(RAW) as never)(new Request(`http://x${RAW}?ref=${encodeURIComponent(JSON.stringify(REF))}`))
+    expect(unavailable.status).toBe(503)
   })
 })

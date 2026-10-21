@@ -11,6 +11,7 @@ import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { SETTINGS_NAMESPACE } from '../core'
 import { DescribeImageSection, type DescribeImageSettings } from './settings'
 import { installSendHook } from './send-hook'
+import { installConversationImagePreview } from './preview'
 
 export const name = 'dsh-describe-image-client'
 /** `slots` 提供槽位注册;`configForms` 提供官方设置读写通道;`conversation` 承载发送拦截。 */
@@ -34,13 +35,20 @@ interface ClientContextLike {
 }
 
 /**
- * 注册设置卡,并安装发送拦截钩子。
+ * 注册设置卡,安装发送拦截钩子与会话内图片预览。
  * @param ctx - Client 上下文,提供 slots、configForms 与 conversation。
  */
 export function apply(ctx: ClientContextLike): void {
   const scope = ctx.configForms.get<DescribeImageSettings>(SETTINGS_NAMESPACE)
 
   installSendHook(ctx, ctx.conversation, scope)
+
+  const preview = installConversationImagePreview(
+    () => scope.getSnapshot().value?.renderImagePreview !== false,
+  )
+  // 设置保存后立即应用:开→重扫,关→还原。
+  scope.subscribe(() => preview.refresh())
+  ctx.effect?.(() => () => preview.dispose())
 
   ctx.slots.inject('settings.section', () =>
     ctx.slots.register(

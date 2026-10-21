@@ -65,6 +65,7 @@ const expected = [
   'maxBytes',
   'maxOutputTokens',
   'model',
+  'renderImagePreview',
   'timeoutMs',
 ]
 check('投影字段与 Config 字段一致', JSON.stringify(fields) === JSON.stringify(expected), fields.join(', '))
