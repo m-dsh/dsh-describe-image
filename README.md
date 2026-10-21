@@ -34,6 +34,9 @@ namespace,即使插件已加载、GUI 也拿不到——这与命名无关,改�
 - **三种协议**:`chat-completions`(默认)、`responses`、`anthropic-messages`。
 - **capability 感知**:发送前经 Host 路由查询现役模型 `inputModalities`,
   视觉模型直通原生管线,探测失败按纯文本处理(fail-closed)。
+- **会话内缩略图预览**:聊天记录中的 `[image attachment {...}]` 引用原地渲染为缩略图
+  (长边上限 240px),点击查看大图(`renderImagePreview` 开关,默认开;仅改浏览器显示,
+  关闭即还原为原始文本)。
 - **设置卡即时生效**:设置 → 插件配置 → 「图像理解」;保存后无需重启,下一次调用即读取新值。
 - **密钥两种来源**:内联 `apiKey`,或 `apiKeyEnv` 引用的环境变量(默认 `VISION_API_KEY`)。
 - **安全边界**:请求与下载均拒绝重定向;本地路径经 `realpath` 围栏,`..` 与符号链接都无法逃逸;
@@ -45,6 +48,8 @@ namespace,即使插件已加载、GUI 也拿不到——这与命名无关,改�
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
+| `interceptImageSend` | `true` | 纯文本模型贴图时自动改写为工具引用;关闭恢复宿主原生行为 |
+| `renderImagePreview` | `true` | 会话内把引用渲染为缩略图;关闭显示原始引用文本 |
 | `baseURL` | 空(必须填写) | 端点根地址;按协议追加 `/chat/completions`、`/responses` 或 `/v1/messages` |
 | `apiStyle` | `chat-completions` | 接口协议 |
 | `model` | 空(必须填写) | 视觉模型 id,例如 `qwen-vl-max`、`glm-4v`、`gpt-4o-mini` |
@@ -94,8 +99,6 @@ dsh --profile <profile> --dump-config   # 确认 describe-image 行已插入
 
 ## 已知边界
 
-- 消息中的 `[image attachment {...}]` 引用显示为原始文本,暂无会话内缩略图预览
-  (后续可加渲染层,不影响功能)。
 - 本地路径要求会话有工作区;无工作区时会话只能用 URL 或贴图引用。
 - 单视觉端点;多端点轮换/容错未实现。
 - capability 探测读不到现役模型时(如未挑过模型的全新会话)按纯文本处理,
